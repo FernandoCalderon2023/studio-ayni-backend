@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1768170446490,
+    "cliente": {
+      "nombre": "lzu",
+      "telefono": "78782174",
+      "direccion": "obrajes",
+      "ciudad": "Lapaz",
+      "referencia": "calle 17 de obrajes",
+      "metodoPago": "qr"
+    },
+    "productos": [
+      {
+        "id": 1768169612948,
+        "nombre": "asdsad",
+        "categoria": "joyeria",
+        "precio": 25,
+        "descripcion": "asdasdsad",
+        "imagen": "/uploads/1768169612943-930355975.png",
+        "colores": [],
+        "createdAt": "2026-01-11T22:13:32.948Z",
+        "colorSeleccionado": null,
+        "precioUnitario": 25,
+        "cantidad": 2
+      }
+    ],
+    "total": 50,
+    "fecha": "2026-01-11T22:27:26.473Z",
+    "estado": "pendiente",
+    "createdAt": "2026-01-11T22:27:26.490Z"
+  }
+]
