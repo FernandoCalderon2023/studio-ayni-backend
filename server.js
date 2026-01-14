@@ -231,19 +231,25 @@ app.patch('/api/pedidos/:id', authenticateToken, (req, res) => {
 
 // ==================== SERVIDOR ====================
 
-app.listen(PORT, () => {
-  console.log(`
-  ╔════════════════════════════════════════╗
-  ║   🎨 SERVIDOR STUDIO AYNI INICIADO    ║
-  ╠════════════════════════════════════════╣
-  ║   Puerto: ${PORT}                        ║
-  ║   API: http://localhost:${PORT}/api      ║
-  ║                                        ║
-  ║   👤 Usuario por defecto:              ║
-  ║   Email: admin@ayni.com                ║
-  ║   Pass: admin123                       ║
-  ║                                        ║
-  ║   ⚠️  CAMBIA LA CONTRASEÑA!            ║
-  ╚════════════════════════════════════════╝
-  `);
-});
+// Para Vercel serverless
+if (process.env.VERCEL) {
+  module.exports = app;
+} else {
+  // Para desarrollo local
+  app.listen(PORT, () => {
+    console.log(`
+ ╔════════════════════════════════════════╗
+ ║ 🎨 SERVIDOR STUDIO AYNI INICIADO     ║
+ ╠════════════════════════════════════════╣
+ ║  Puerto: ${PORT}                      ║
+ ║  API: http://localhost:${PORT}/api    ║
+ ║                                        ║
+ ║  👤 Usuario por defecto:              ║
+ ║     Email: admin@ayni.com             ║
+ ║     Pass: admin123                    ║
+ ║                                        ║
+ ║  ⚠️  CAMBIA LA CONTRASEÑA!            ║
+ ╚════════════════════════════════════════╝
+    `);
+  });
+}
