@@ -5,33 +5,60 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const SECRET_KEY = 'CAMBIA-ESTO-POR-CLAVE-SEGURA-123';
+const SECRET_KEY = process.env.SECRET_KEY || 'CAMBIA-ESTO-POR-CLAVE-SEGURA-123';
+
+// Configuración de Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dhlqwu0oe',
+  api_key: process.env.CLOUDINARY_API_KEY || '369226422217697',
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 // Middleware
-app.use(cors());
-app.use(express.json());
-app.use('/uploads', express.static('uploads'));
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://studio-ayni-frontend-o3uv.vercel.app',
+  'https://fernandocalderon2023.github.io'
+];
 
-// Crear carpetas si no existen
-if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
+app.use(cors({
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.some(allowed => origin.startsWith(allowed))) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
+
+app.use(express.json());
+
+// Crear carpeta data si no existe
 if (!fs.existsSync('data')) fs.mkdirSync('data');
 
-// Configurar multer para subir imágenes
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, 'uploads/'),
-  filename: (req, file, cb) => {
-    const uniqueName = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
-    cb(null, uniqueName);
+// Configuración de Cloudinary Storage para multer
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'studio-ayni',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+    transformation: [{ width: 1000, height: 1000, crop: 'limit' }]
   }
 });
-const upload = multer({ storage });
+
+const upload = multer({ storage: storage });
 
 // Archivos de datos
 const PRODUCTOS_FILE = path.join(__dirname, 'data', 'productos.json');
 const USERS_FILE = path.join(__dirname, 'data', 'users.json');
+const PEDIDOS_FILE = path.join(__dirname, 'data', 'pedidos.json');
 
 // Inicializar archivos si no existen
 if (!fs.existsSync(PRODUCTOS_FILE)) {
@@ -44,64 +71,107 @@ if (!fs.existsSync(USERS_FILE)) {
   fs.writeFileSync(USERS_FILE, JSON.stringify([{
     id: 1,
     email: 'admin@ayni.com',
-    password: hashedPassword
+    password: hashedPassword,
+    role: 'admin'
   }]));
 }
 
-// Helpers
-const readJSON = (file) => JSON.parse(fs.readFileSync(file, 'utf-8'));
-const writeJSON = (file, data) => fs.writeFileSync(file, JSON.stringify(data, null, 2));
+if (!fs.existsSync(PEDIDOS_FILE)) {
+  fs.writeFileSync(PEDIDOS_FILE, JSON.stringify([]));
+}
 
-// Middleware de autenticación
-const authenticateToken = (req, res, next) => {
-  const token = req.headers['authorization']?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'No autorizado' });
-
-  jwt.verify(token, SECRET_KEY, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Token inválido' });
-    req.user = user;
-    next();
-  });
+// Funciones auxiliares
+const readJSON = (filename) => {
+  try {
+    return JSON.parse(fs.readFileSync(filename, 'utf8'));
+  } catch (error) {
+    return [];
+  }
 };
 
-// ==================== RUTAS DE AUTENTICACIÓN ====================
+const writeJSON = (filename, data) => {
+  fs.writeFileSync(filename, JSON.stringify(data, null, 2));
+};
 
-// Login
-app.post('/api/login', (req, res) => {
-  const { email, password } = req.body;
-  const users = readJSON(USERS_FILE);
-  const user = users.find(u => u.email === email);
+// Middleware de autenticación
+const verificarToken = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'No autorizado' });
 
-  if (!user) {
-    return res.status(401).json({ error: 'Credenciales inválidas' });
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    req.userId = decoded.userId;
+    next();
+  } catch (error) {
+    res.status(401).json({ error: 'Token inválido' });
   }
+};
 
-  const validPassword = bcrypt.compareSync(password, user.password);
-  if (!validPassword) {
-    return res.status(401).json({ error: 'Credenciales inválidas' });
+// ============================================
+// RUTAS DE AUTENTICACIÓN
+// ============================================
+
+// POST - Login
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const users = readJSON(USERS_FILE);
+    
+    const user = users.find(u => u.email === email);
+    if (!user) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    const token = jwt.sign({ userId: user.id }, SECRET_KEY, { expiresIn: '24h' });
+    res.json({ token, user: { id: user.id, email: user.email } });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
-
-  const token = jwt.sign({ id: user.id, email: user.email }, SECRET_KEY, { expiresIn: '24h' });
-  res.json({ token, email: user.email });
 });
 
-// Verificar token
-app.get('/api/verify', authenticateToken, (req, res) => {
-  res.json({ email: req.user.email });
+// GET - Verificar token
+app.get('/api/verify', verificarToken, (req, res) => {
+  res.json({ valid: true });
 });
 
-// ==================== RUTAS DE PRODUCTOS ====================
+// ============================================
+// RUTAS DE PRODUCTOS
+// ============================================
 
-// Obtener todos los productos (PÚBLICO)
+// GET - Obtener todos los productos
 app.get('/api/productos', (req, res) => {
-  const productos = readJSON(PRODUCTOS_FILE);
-  res.json(productos);
-});
-
-// Agregar producto (PROTEGIDO)
-app.post('/api/productos', authenticateToken, upload.single('imagen'), (req, res) => {
   try {
     const productos = readJSON(PRODUCTOS_FILE);
+    res.json(productos);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET - Obtener un producto por ID
+app.get('/api/productos/:id', (req, res) => {
+  try {
+    const productos = readJSON(PRODUCTOS_FILE);
+    const producto = productos.find(p => p.id === parseInt(req.params.id));
+    
+    if (!producto) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+    
+    res.json(producto);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST - Agregar producto (con Cloudinary)
+app.post('/api/productos', verificarToken, upload.single('imagen'), async (req, res) => {
+  try {
     const { nombre, categoria, precio, descripcion, colores, novedad } = req.body;
 
     const nuevoProducto = {
@@ -110,12 +180,13 @@ app.post('/api/productos', authenticateToken, upload.single('imagen'), (req, res
       categoria,
       precio: parseFloat(precio),
       descripcion,
-      imagen: req.file ? `/uploads/${req.file.filename}` : null,
+      imagen: req.file ? req.file.path : null, // URL de Cloudinary
       colores: colores ? JSON.parse(colores) : [],
       novedad: novedad === 'true' || novedad === true,
       createdAt: new Date().toISOString()
     };
 
+    const productos = readJSON(PRODUCTOS_FILE);
     productos.push(nuevoProducto);
     writeJSON(PRODUCTOS_FILE, productos);
 
@@ -125,69 +196,56 @@ app.post('/api/productos', authenticateToken, upload.single('imagen'), (req, res
   }
 });
 
-// Subir imagen de color
-app.post('/api/upload-color', authenticateToken, upload.single('imagen'), (req, res) => {
-  try {
-    res.json({ url: `/uploads/${req.file.filename}` });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Eliminar producto (PROTEGIDO)
-app.delete('/api/productos/:id', authenticateToken, (req, res) => {
+// DELETE - Eliminar producto
+app.delete('/api/productos/:id', verificarToken, async (req, res) => {
   try {
     const productos = readJSON(PRODUCTOS_FILE);
-    const id = parseInt(req.params.id);
+    const index = productos.findIndex(p => p.id === parseInt(req.params.id));
     
-    const producto = productos.find(p => p.id === id);
-    if (producto) {
-      // Eliminar imagen del producto
-      if (producto.imagen) {
-        const imagePath = path.join(__dirname, producto.imagen);
-        if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
-      }
-      
-      // Eliminar imágenes de colores
-      if (producto.colores) {
-        producto.colores.forEach(color => {
-          if (color.imagen) {
-            const colorImagePath = path.join(__dirname, color.imagen);
-            if (fs.existsSync(colorImagePath)) fs.unlinkSync(colorImagePath);
-          }
-        });
+    if (index === -1) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    // Opcional: Eliminar imagen de Cloudinary
+    const producto = productos[index];
+    if (producto.imagen && producto.imagen.includes('cloudinary.com')) {
+      try {
+        const publicId = producto.imagen.split('/').slice(-2).join('/').split('.')[0];
+        await cloudinary.uploader.destroy(publicId);
+      } catch (error) {
+        console.error('Error eliminando imagen de Cloudinary:', error);
       }
     }
 
-    const nuevosProductos = productos.filter(p => p.id !== id);
-    writeJSON(PRODUCTOS_FILE, nuevosProductos);
+    productos.splice(index, 1);
+    writeJSON(PRODUCTOS_FILE, productos);
 
-    res.json({ success: true });
+    res.json({ success: true, message: 'Producto eliminado' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// ==================== RUTAS DE PEDIDOS ====================
+// ============================================
+// RUTAS DE PEDIDOS
+// ============================================
 
-const PEDIDOS_FILE = path.join(__dirname, 'data', 'pedidos.json');
-
-// Inicializar archivo de pedidos si no existe
-if (!fs.existsSync(PEDIDOS_FILE)) {
-  fs.writeFileSync(PEDIDOS_FILE, JSON.stringify([]));
-}
-
-// Crear pedido (PÚBLICO - cualquiera puede hacer pedidos)
-app.post('/api/pedidos', (req, res) => {
+// POST - Crear pedido
+app.post('/api/pedidos', async (req, res) => {
   try {
-    const pedidos = readJSON(PEDIDOS_FILE);
+    const { cliente, productos, total, metodoPago } = req.body;
+
     const nuevoPedido = {
       id: Date.now(),
-      ...req.body,
+      cliente,
+      productos,
+      total,
+      metodoPago,
       estado: 'pendiente',
       createdAt: new Date().toISOString()
     };
 
+    const pedidos = readJSON(PEDIDOS_FILE);
     pedidos.push(nuevoPedido);
     writeJSON(PEDIDOS_FILE, pedidos);
 
@@ -197,8 +255,8 @@ app.post('/api/pedidos', (req, res) => {
   }
 });
 
-// Obtener todos los pedidos (PROTEGIDO)
-app.get('/api/pedidos', authenticateToken, (req, res) => {
+// GET - Obtener todos los pedidos (requiere autenticación)
+app.get('/api/pedidos', verificarToken, (req, res) => {
   try {
     const pedidos = readJSON(PEDIDOS_FILE);
     res.json(pedidos);
@@ -207,35 +265,42 @@ app.get('/api/pedidos', authenticateToken, (req, res) => {
   }
 });
 
-// Actualizar estado de pedido (PROTEGIDO)
-app.patch('/api/pedidos/:id', authenticateToken, (req, res) => {
+// ============================================
+// RUTAS DE USUARIOS
+// ============================================
+
+// GET - Obtener usuarios (solo para admin)
+app.get('/api/usuarios', verificarToken, (req, res) => {
   try {
-    const pedidos = readJSON(PEDIDOS_FILE);
-    const id = parseInt(req.params.id);
-    const { estado } = req.body;
-
-    const pedidoIndex = pedidos.findIndex(p => p.id === id);
-    if (pedidoIndex === -1) {
-      return res.status(404).json({ error: 'Pedido no encontrado' });
-    }
-
-    pedidos[pedidoIndex].estado = estado;
-    pedidos[pedidoIndex].updatedAt = new Date().toISOString();
-    
-    writeJSON(PEDIDOS_FILE, pedidos);
-    res.json({ success: true, pedido: pedidos[pedidoIndex] });
+    const users = readJSON(USERS_FILE);
+    const usersWithoutPassword = users.map(({ password, ...user }) => user);
+    res.json(usersWithoutPassword);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// ==================== SERVIDOR ====================
+// ============================================
+// RUTA DE SALUD
+// ============================================
+
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    cloudinary: cloudinary.config().cloud_name ? 'configured' : 'not configured'
+  });
+});
+
+// ============================================
+// INICIO DEL SERVIDOR
+// ============================================
 
 // Para Vercel serverless
 if (process.env.VERCEL) {
   module.exports = app;
 } else {
-  // Para desarrollo local
+  // Para desarrollo local y Render
   app.listen(PORT, () => {
     console.log(`
  ╔════════════════════════════════════════╗
@@ -248,6 +313,7 @@ if (process.env.VERCEL) {
  ║     Email: admin@ayni.com             ║
  ║     Pass: admin123                    ║
  ║                                        ║
+ ║  ☁️  Cloudinary: ${cloudinary.config().cloud_name || 'No configurado'} ║
  ║  ⚠️  CAMBIA LA CONTRASEÑA!            ║
  ╚════════════════════════════════════════╝
     `);
