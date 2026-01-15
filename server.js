@@ -28,10 +28,17 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function(origin, callback) {
+    // 1. Permitir peticiones sin origen (como Postman o Server-to-Server)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.some(allowed => origin.startsWith(allowed))) {
+    
+    // 2. Verificar si el origen está en la lista o si es UN SUBDOMINIO de vercel.app de tu proyecto
+    const isAllowed = allowedOrigins.includes(origin) || 
+                      origin.includes('vercel.app'); // Esto permite cualquier URL de vercel
+
+    if (isAllowed) {
       callback(null, true);
     } else {
+      console.log("Origen bloqueado por CORS:", origin); // Esto te ayudará a ver qué URL exacta falla
       callback(new Error('Not allowed by CORS'));
     }
   },
