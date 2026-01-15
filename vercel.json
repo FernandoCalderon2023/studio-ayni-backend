@@ -1,19 +1,15 @@
 {
-  "version": 2,
-  "builds": [
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "rewrites": [
     {
-      "src": "server.js",
-      "use": "@vercel/node"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/uploads/(.*)",
-      "dest": "/server.js"
+      "source": "/api/:path*",
+      "destination": "https://studio-ayni-backend.onrender.com/api/:path*"
     },
     {
-      "src": "/(.*)",
-      "dest": "/server.js"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
