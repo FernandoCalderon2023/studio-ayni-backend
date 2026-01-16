@@ -3,14 +3,19 @@ const cors = require('cors');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const fs = require('fs');
-const path = require('path');
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const SECRET_KEY = process.env.SECRET_KEY || 'CAMBIA-ESTO-POR-CLAVE-SEGURA-123';
+
+// Configuración de Supabase
+const supabase = createClient(
+  process.env.SUPABASE_URL || 'TU_SUPABASE_URL',
+  process.env.SUPABASE_SERVICE_KEY || 'TU_SUPABASE_SERVICE_KEY'
+);
 
 // Configuración de Cloudinary
 cloudinary.config({
@@ -19,9 +24,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// ============================================
-// CORS CORREGIDO - MUY IMPORTANTE
-// ============================================
+// CORS
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
@@ -32,18 +35,13 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function(origin, callback) {
-    // Permitir requests sin origin (como Postman, curl, etc)
     if (!origin) return callback(null, true);
-    
-    // Verificar si el origin está en la lista permitida
     const isAllowed = allowedOrigins.some(allowed => {
       if (origin === allowed) return true;
       if (origin.startsWith(allowed)) return true;
-      // Para Vercel preview deployments
       if (allowed.includes('vercel.app') && origin.includes('vercel.app')) return true;
       return false;
     });
-    
     if (isAllowed) {
       callback(null, true);
     } else {
@@ -58,10 +56,7 @@ app.use(cors({
 
 app.use(express.json());
 
-// Crear carpeta data si no existe
-if (!fs.existsSync('data')) fs.mkdirSync('data');
-
-// Configuración de Cloudinary Storage para multer
+// Configuración de Cloudinary Storage
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
@@ -72,49 +67,6 @@ const storage = new CloudinaryStorage({
 });
 
 const upload = multer({ storage: storage });
-
-// Archivos de datos
-const PRODUCTOS_FILE = path.join(__dirname, 'data', 'productos.json');
-const USERS_FILE = path.join(__dirname, 'data', 'users.json');
-const PEDIDOS_FILE = path.join(__dirname, 'data', 'pedidos.json');
-
-// Inicializar archivos si no existen
-if (!fs.existsSync(PRODUCTOS_FILE)) {
-  fs.writeFileSync(PRODUCTOS_FILE, JSON.stringify([]));
-}
-
-if (!fs.existsSync(USERS_FILE)) {
-  // Crear usuario por defecto: admin@ayni.com / admin123
-  const hashedPassword = bcrypt.hashSync('admin123', 10);
-  fs.writeFileSync(USERS_FILE, JSON.stringify([{
-    id: 1,
-    email: 'admin@ayni.com',
-    password: hashedPassword,
-    role: 'admin'
-  }]));
-}
-
-if (!fs.existsSync(PEDIDOS_FILE)) {
-  fs.writeFileSync(PEDIDOS_FILE, JSON.stringify([]));
-}
-
-// Funciones auxiliares
-const readJSON = (filename) => {
-  try {
-    return JSON.parse(fs.readFileSync(filename, 'utf8'));
-  } catch (error) {
-    console.error('Error reading JSON:', error);
-    return [];
-  }
-};
-
-const writeJSON = (filename, data) => {
-  try {
-    fs.writeFileSync(filename, JSON.stringify(data, null, 2));
-  } catch (error) {
-    console.error('Error writing JSON:', error);
-  }
-};
 
 // Middleware de autenticación
 const verificarToken = (req, res, next) => {
@@ -138,14 +90,20 @@ const verificarToken = (req, res, next) => {
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    const users = readJSON(USERS_FILE);
     
-    const user = users.find(u => u.email === email);
-    if (!user) {
+    const { data: users, error } = await supabase
+      .from('usuarios')
+      .select('*')
+      .eq('email', email)
+      .limit(1);
+
+    if (error || !users || users.length === 0) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
+    const user = users[0];
     const validPassword = await bcrypt.compare(password, user.password);
+    
     if (!validPassword) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
@@ -168,10 +126,15 @@ app.get('/api/verify', verificarToken, (req, res) => {
 // ============================================
 
 // GET - Obtener todos los productos
-app.get('/api/productos', (req, res) => {
+app.get('/api/productos', async (req, res) => {
   try {
-    const productos = readJSON(PRODUCTOS_FILE);
-    res.json(productos);
+    const { data: productos, error } = await supabase
+      .from('productos')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(productos || []);
   } catch (error) {
     console.error('Error getting productos:', error);
     res.status(500).json({ error: error.message });
@@ -179,15 +142,18 @@ app.get('/api/productos', (req, res) => {
 });
 
 // GET - Obtener un producto por ID
-app.get('/api/productos/:id', (req, res) => {
+app.get('/api/productos/:id', async (req, res) => {
   try {
-    const productos = readJSON(PRODUCTOS_FILE);
-    const producto = productos.find(p => p.id === parseInt(req.params.id));
-    
-    if (!producto) {
+    const { data: producto, error } = await supabase
+      .from('productos')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error || !producto) {
       return res.status(404).json({ error: 'Producto no encontrado' });
     }
-    
+
     res.json(producto);
   } catch (error) {
     console.error('Error getting producto:', error);
@@ -195,29 +161,31 @@ app.get('/api/productos/:id', (req, res) => {
   }
 });
 
-// POST - Agregar producto (con Cloudinary)
+// POST - Agregar producto
 app.post('/api/productos', verificarToken, upload.single('imagen'), async (req, res) => {
   try {
     const { nombre, categoria, precio, descripcion, colores, novedad } = req.body;
 
     const nuevoProducto = {
-      id: Date.now(),
       nombre,
       categoria,
       precio: parseFloat(precio),
       descripcion,
-      imagen: req.file ? req.file.path : null, // URL de Cloudinary
+      imagen: req.file ? req.file.path : null,
       colores: colores ? JSON.parse(colores) : [],
-      novedad: novedad === 'true' || novedad === true,
-      createdAt: new Date().toISOString()
+      novedad: novedad === 'true' || novedad === true
     };
 
-    const productos = readJSON(PRODUCTOS_FILE);
-    productos.push(nuevoProducto);
-    writeJSON(PRODUCTOS_FILE, productos);
+    const { data, error } = await supabase
+      .from('productos')
+      .insert([nuevoProducto])
+      .select()
+      .single();
 
-    console.log('Producto agregado:', nuevoProducto.nombre);
-    res.json({ success: true, producto: nuevoProducto });
+    if (error) throw error;
+
+    console.log('Producto agregado:', data.nombre);
+    res.json({ success: true, producto: data });
   } catch (error) {
     console.error('Error adding producto:', error);
     res.status(500).json({ error: error.message });
@@ -228,29 +196,36 @@ app.post('/api/productos', verificarToken, upload.single('imagen'), async (req, 
 app.put('/api/productos/:id', verificarToken, upload.single('imagen'), async (req, res) => {
   try {
     const { nombre, categoria, precio, descripcion, colores, novedad } = req.body;
-    const productos = readJSON(PRODUCTOS_FILE);
-    const index = productos.findIndex(p => p.id === parseInt(req.params.id));
     
-    if (index === -1) {
-      return res.status(404).json({ error: 'Producto no encontrado' });
-    }
+    // Obtener producto actual para mantener imagen si no se sube nueva
+    const { data: productoActual } = await supabase
+      .from('productos')
+      .select('imagen')
+      .eq('id', req.params.id)
+      .single();
 
-    // Actualizar campos
-    productos[index] = {
-      ...productos[index],
+    const productoActualizado = {
       nombre,
       categoria,
       precio: parseFloat(precio),
       descripcion,
-      imagen: req.file ? req.file.path : productos[index].imagen,
-      colores: colores ? JSON.parse(colores) : productos[index].colores,
+      imagen: req.file ? req.file.path : productoActual?.imagen,
+      colores: colores ? JSON.parse(colores) : [],
       novedad: novedad === 'true' || novedad === true,
-      updatedAt: new Date().toISOString()
+      updated_at: new Date().toISOString()
     };
 
-    writeJSON(PRODUCTOS_FILE, productos);
-    console.log('Producto actualizado:', productos[index].nombre);
-    res.json({ success: true, producto: productos[index] });
+    const { data, error } = await supabase
+      .from('productos')
+      .update(productoActualizado)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log('Producto actualizado:', data.nombre);
+    res.json({ success: true, producto: data });
   } catch (error) {
     console.error('Error updating producto:', error);
     res.status(500).json({ error: error.message });
@@ -260,16 +235,14 @@ app.put('/api/productos/:id', verificarToken, upload.single('imagen'), async (re
 // DELETE - Eliminar producto
 app.delete('/api/productos/:id', verificarToken, async (req, res) => {
   try {
-    const productos = readJSON(PRODUCTOS_FILE);
-    const index = productos.findIndex(p => p.id === parseInt(req.params.id));
-    
-    if (index === -1) {
-      return res.status(404).json({ error: 'Producto no encontrado' });
-    }
+    // Obtener producto para eliminar imagen de Cloudinary
+    const { data: producto } = await supabase
+      .from('productos')
+      .select('imagen')
+      .eq('id', req.params.id)
+      .single();
 
-    // Opcional: Eliminar imagen de Cloudinary
-    const producto = productos[index];
-    if (producto.imagen && producto.imagen.includes('cloudinary.com')) {
+    if (producto && producto.imagen && producto.imagen.includes('cloudinary.com')) {
       try {
         const publicId = producto.imagen.split('/').slice(-2).join('/').split('.')[0];
         await cloudinary.uploader.destroy(publicId);
@@ -279,8 +252,12 @@ app.delete('/api/productos/:id', verificarToken, async (req, res) => {
       }
     }
 
-    productos.splice(index, 1);
-    writeJSON(PRODUCTOS_FILE, productos);
+    const { error } = await supabase
+      .from('productos')
+      .delete()
+      .eq('id', req.params.id);
+
+    if (error) throw error;
 
     console.log('Producto eliminado');
     res.json({ success: true, message: 'Producto eliminado' });
@@ -300,32 +277,39 @@ app.post('/api/pedidos', async (req, res) => {
     const { cliente, productos, total, metodoPago } = req.body;
 
     const nuevoPedido = {
-      id: Date.now(),
       cliente,
       productos,
-      total,
-      metodoPago,
-      estado: 'pendiente',
-      createdAt: new Date().toISOString()
+      total: parseFloat(total),
+      metodo_pago: metodoPago || 'efectivo',
+      estado: 'pendiente'
     };
 
-    const pedidos = readJSON(PEDIDOS_FILE);
-    pedidos.push(nuevoPedido);
-    writeJSON(PEDIDOS_FILE, pedidos);
+    const { data, error } = await supabase
+      .from('pedidos')
+      .insert([nuevoPedido])
+      .select()
+      .single();
 
-    console.log('Pedido creado:', nuevoPedido.id);
-    res.json({ success: true, pedido: nuevoPedido });
+    if (error) throw error;
+
+    console.log('Pedido creado:', data.id);
+    res.json({ success: true, pedido: data });
   } catch (error) {
     console.error('Error creating pedido:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// GET - Obtener todos los pedidos (requiere autenticación)
-app.get('/api/pedidos', verificarToken, (req, res) => {
+// GET - Obtener todos los pedidos
+app.get('/api/pedidos', verificarToken, async (req, res) => {
   try {
-    const pedidos = readJSON(PEDIDOS_FILE);
-    res.json(pedidos);
+    const { data: pedidos, error } = await supabase
+      .from('pedidos')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(pedidos || []);
   } catch (error) {
     console.error('Error getting pedidos:', error);
     res.status(500).json({ error: error.message });
@@ -336,12 +320,15 @@ app.get('/api/pedidos', verificarToken, (req, res) => {
 // RUTAS DE USUARIOS
 // ============================================
 
-// GET - Obtener usuarios (solo para admin)
-app.get('/api/usuarios', verificarToken, (req, res) => {
+// GET - Obtener usuarios
+app.get('/api/usuarios', verificarToken, async (req, res) => {
   try {
-    const users = readJSON(USERS_FILE);
-    const usersWithoutPassword = users.map(({ password, ...user }) => user);
-    res.json(usersWithoutPassword);
+    const { data: users, error } = await supabase
+      .from('usuarios')
+      .select('id, email, role, created_at');
+
+    if (error) throw error;
+    res.json(users || []);
   } catch (error) {
     console.error('Error getting users:', error);
     res.status(500).json({ error: error.message });
@@ -352,24 +339,36 @@ app.get('/api/usuarios', verificarToken, (req, res) => {
 // RUTA DE SALUD
 // ============================================
 
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    cloudinary: cloudinary.config().cloud_name ? 'configured' : 'not configured',
-    cors: 'enabled',
-    allowedOrigins: allowedOrigins
-  });
+app.get('/api/health', async (req, res) => {
+  try {
+    // Verificar conexión con Supabase
+    const { data, error } = await supabase
+      .from('productos')
+      .select('count')
+      .limit(1);
+
+    res.json({ 
+      status: 'OK', 
+      timestamp: new Date().toISOString(),
+      cloudinary: cloudinary.config().cloud_name ? 'configured' : 'not configured',
+      cors: 'enabled',
+      database: error ? 'error' : 'connected',
+      supabase: error ? 'error' : 'connected'
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'ERROR',
+      error: error.message
+    });
+  }
 });
 
-// ============================================
 // RUTA ROOT
-// ============================================
-
 app.get('/', (req, res) => {
   res.json({
-    message: 'Studio AYNI API',
-    version: '1.0.0',
+    message: 'Studio AYNI API with Supabase',
+    version: '2.0.0',
+    database: 'Supabase PostgreSQL',
     endpoints: {
       health: '/api/health',
       productos: '/api/productos',
@@ -382,15 +381,13 @@ app.get('/', (req, res) => {
 // INICIO DEL SERVIDOR
 // ============================================
 
-// Para Vercel serverless
 if (process.env.VERCEL) {
   module.exports = app;
 } else {
-  // Para desarrollo local y Render
   app.listen(PORT, () => {
     console.log(`
  ╔════════════════════════════════════════╗
- ║ 🎨 SERVIDOR STUDIO AYNI INICIADO     ║
+ ║ 🎨 SERVIDOR STUDIO AYNI - SUPABASE    ║
  ╠════════════════════════════════════════╣
  ║  Puerto: ${PORT}                      ║
  ║  API: http://localhost:${PORT}/api    ║
@@ -399,9 +396,9 @@ if (process.env.VERCEL) {
  ║     Email: admin@ayni.com             ║
  ║     Pass: admin123                    ║
  ║                                        ║
- ║  ☁️  Cloudinary: ${cloudinary.config().cloud_name || 'No configurado'} ║
+ ║  ☁️  Cloudinary: ${cloudinary.config().cloud_name || 'No config'} ║
+ ║  🗄️  Database: Supabase PostgreSQL    ║
  ║  🔒 CORS: Habilitado                  ║
- ║  ⚠️  CAMBIA LA CONTRASEÑA!            ║
  ╚════════════════════════════════════════╝
     `);
   });
