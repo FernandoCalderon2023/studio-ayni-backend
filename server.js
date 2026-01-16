@@ -19,23 +19,41 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Middleware
+// ============================================
+// CORS CORREGIDO - MUY IMPORTANTE
+// ============================================
 const allowedOrigins = [
   'http://localhost:5173',
+  'http://localhost:5174',
   'https://studio-ayni-frontend-o3uv.vercel.app',
+  'https://studio-ayni-frontend.vercel.app',
   'https://fernandocalderon2023.github.io'
 ];
 
 app.use(cors({
   origin: function(origin, callback) {
+    // Permitir requests sin origin (como Postman, curl, etc)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.some(allowed => origin.startsWith(allowed))) {
+    
+    // Verificar si el origin está en la lista permitida
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (origin === allowed) return true;
+      if (origin.startsWith(allowed)) return true;
+      // Para Vercel preview deployments
+      if (allowed.includes('vercel.app') && origin.includes('vercel.app')) return true;
+      return false;
+    });
+    
+    if (isAllowed) {
       callback(null, true);
     } else {
+      console.error('CORS Error - Origin not allowed:', origin);
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(express.json());
@@ -85,12 +103,17 @@ const readJSON = (filename) => {
   try {
     return JSON.parse(fs.readFileSync(filename, 'utf8'));
   } catch (error) {
+    console.error('Error reading JSON:', error);
     return [];
   }
 };
 
 const writeJSON = (filename, data) => {
-  fs.writeFileSync(filename, JSON.stringify(data, null, 2));
+  try {
+    fs.writeFileSync(filename, JSON.stringify(data, null, 2));
+  } catch (error) {
+    console.error('Error writing JSON:', error);
+  }
 };
 
 // Middleware de autenticación
@@ -130,6 +153,7 @@ app.post('/api/login', async (req, res) => {
     const token = jwt.sign({ userId: user.id }, SECRET_KEY, { expiresIn: '24h' });
     res.json({ token, user: { id: user.id, email: user.email } });
   } catch (error) {
+    console.error('Login error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -149,6 +173,7 @@ app.get('/api/productos', (req, res) => {
     const productos = readJSON(PRODUCTOS_FILE);
     res.json(productos);
   } catch (error) {
+    console.error('Error getting productos:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -165,6 +190,7 @@ app.get('/api/productos/:id', (req, res) => {
     
     res.json(producto);
   } catch (error) {
+    console.error('Error getting producto:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -190,8 +216,43 @@ app.post('/api/productos', verificarToken, upload.single('imagen'), async (req, 
     productos.push(nuevoProducto);
     writeJSON(PRODUCTOS_FILE, productos);
 
+    console.log('Producto agregado:', nuevoProducto.nombre);
     res.json({ success: true, producto: nuevoProducto });
   } catch (error) {
+    console.error('Error adding producto:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT - Actualizar producto
+app.put('/api/productos/:id', verificarToken, upload.single('imagen'), async (req, res) => {
+  try {
+    const { nombre, categoria, precio, descripcion, colores, novedad } = req.body;
+    const productos = readJSON(PRODUCTOS_FILE);
+    const index = productos.findIndex(p => p.id === parseInt(req.params.id));
+    
+    if (index === -1) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    // Actualizar campos
+    productos[index] = {
+      ...productos[index],
+      nombre,
+      categoria,
+      precio: parseFloat(precio),
+      descripcion,
+      imagen: req.file ? req.file.path : productos[index].imagen,
+      colores: colores ? JSON.parse(colores) : productos[index].colores,
+      novedad: novedad === 'true' || novedad === true,
+      updatedAt: new Date().toISOString()
+    };
+
+    writeJSON(PRODUCTOS_FILE, productos);
+    console.log('Producto actualizado:', productos[index].nombre);
+    res.json({ success: true, producto: productos[index] });
+  } catch (error) {
+    console.error('Error updating producto:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -212,6 +273,7 @@ app.delete('/api/productos/:id', verificarToken, async (req, res) => {
       try {
         const publicId = producto.imagen.split('/').slice(-2).join('/').split('.')[0];
         await cloudinary.uploader.destroy(publicId);
+        console.log('Imagen eliminada de Cloudinary:', publicId);
       } catch (error) {
         console.error('Error eliminando imagen de Cloudinary:', error);
       }
@@ -220,8 +282,10 @@ app.delete('/api/productos/:id', verificarToken, async (req, res) => {
     productos.splice(index, 1);
     writeJSON(PRODUCTOS_FILE, productos);
 
+    console.log('Producto eliminado');
     res.json({ success: true, message: 'Producto eliminado' });
   } catch (error) {
+    console.error('Error deleting producto:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -249,8 +313,10 @@ app.post('/api/pedidos', async (req, res) => {
     pedidos.push(nuevoPedido);
     writeJSON(PEDIDOS_FILE, pedidos);
 
+    console.log('Pedido creado:', nuevoPedido.id);
     res.json({ success: true, pedido: nuevoPedido });
   } catch (error) {
+    console.error('Error creating pedido:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -261,6 +327,7 @@ app.get('/api/pedidos', verificarToken, (req, res) => {
     const pedidos = readJSON(PEDIDOS_FILE);
     res.json(pedidos);
   } catch (error) {
+    console.error('Error getting pedidos:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -276,6 +343,7 @@ app.get('/api/usuarios', verificarToken, (req, res) => {
     const usersWithoutPassword = users.map(({ password, ...user }) => user);
     res.json(usersWithoutPassword);
   } catch (error) {
+    console.error('Error getting users:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -288,7 +356,25 @@ app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
-    cloudinary: cloudinary.config().cloud_name ? 'configured' : 'not configured'
+    cloudinary: cloudinary.config().cloud_name ? 'configured' : 'not configured',
+    cors: 'enabled',
+    allowedOrigins: allowedOrigins
+  });
+});
+
+// ============================================
+// RUTA ROOT
+// ============================================
+
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Studio AYNI API',
+    version: '1.0.0',
+    endpoints: {
+      health: '/api/health',
+      productos: '/api/productos',
+      login: '/api/login'
+    }
   });
 });
 
@@ -314,6 +400,7 @@ if (process.env.VERCEL) {
  ║     Pass: admin123                    ║
  ║                                        ║
  ║  ☁️  Cloudinary: ${cloudinary.config().cloud_name || 'No configurado'} ║
+ ║  🔒 CORS: Habilitado                  ║
  ║  ⚠️  CAMBIA LA CONTRASEÑA!            ║
  ╚════════════════════════════════════════╝
     `);
