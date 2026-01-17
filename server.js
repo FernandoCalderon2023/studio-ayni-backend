@@ -33,6 +33,7 @@ cloudinary.config({
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
+  'https://studio-ayni.vercel.app',
   'https://studio-ayni-frontend-o3uv.vercel.app',
   'https://studio-ayni-frontend.vercel.app',
   'https://fernandocalderon2023.github.io'
