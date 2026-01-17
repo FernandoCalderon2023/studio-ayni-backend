@@ -1,438 +1,477 @@
-import { useState, useEffect } from 'react';
-import { X, Upload, Trash2, LogOut } from 'lucide-react';
-import './Admin.css';
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const { createClient } = require('@supabase/supabase-js');
 
-const API_URL = 'https://studio-ayni-backend.onrender.com/api';
+const app = express();
+const PORT = process.env.PORT || 3001;
+const SECRET_KEY = process.env.SECRET_KEY || 'CAMBIA-ESTO-POR-CLAVE-SEGURA-123';
 
-function Admin() {
-  const [token, setToken] = useState(localStorage.getItem('token'));
-  const [loading, setLoading] = useState(false);
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [productos, setProductos] = useState([]);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+// ============================================
+// CONFIGURACIÓN DE SUPABASE
+// ============================================
+const supabaseUrl = 'https://omdzbitywwccricrdjnd.supabase.co';
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // Form states
-  const [nombre, setNombre] = useState('');
-  const [categoria, setCategoria] = useState('');
-  const [precio, setPrecio] = useState('');
-  const [descripcion, setDescripcion] = useState('');
-  const [imagenPrincipal, setImagenPrincipal] = useState(null);
-  const [colores, setColores] = useState([]);
-  const [novedad, setNovedad] = useState(false);
+// ============================================
+// CONFIGURACIÓN DE CLOUDINARY
+// ============================================
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dhlqwu0oe',
+  api_key: process.env.CLOUDINARY_API_KEY || '369226422217697',
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
-  // Verificar token al cargar
-  useEffect(() => {
-    if (token) {
-      verificarToken();
-      cargarProductos();
-    }
-  }, [token]);
+// ============================================
+// CONFIGURACIÓN DE CORS
+// ============================================
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'https://studio-ayni-frontend-o3uv.vercel.app',
+  'https://studio-ayni-frontend.vercel.app',
+  'https://fernandocalderon2023.github.io'
+];
 
-  // Verificar token
-  const verificarToken = async () => {
-    try {
-      const response = await fetch(`${API_URL}/verify`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!response.ok) {
-        handleLogout();
-      }
-    } catch (err) {
-      handleLogout();
-    }
-  };
-
-  // Login
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-
-    try {
-      const response = await fetch(`${API_URL}/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Error al iniciar sesión');
-      }
-
-      localStorage.setItem('token', data.token);
-      setToken(data.token);
-      setSuccess('✅ Login exitoso!');
-      setUsername('');
-      setPassword('');
-    } catch (err) {
-      setError('❌ ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Logout
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    setToken(null);
-    setSuccess('👋 Sesión cerrada');
-  };
-
-  // Cargar productos
-  const cargarProductos = async () => {
-    try {
-      const response = await fetch(`${API_URL}/productos`);
-      const data = await response.json();
-      setProductos(data);
-    } catch (err) {
-      setError('Error al cargar productos');
-    }
-  };
-
-  // Subir imagen de color
-  const uploadColorImage = async (file) => {
-    const formData = new FormData();
-    formData.append('imagen', file);
-
-    const response = await fetch(`${API_URL}/upload-color`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-      body: formData
-    });
-
-    const data = await response.json();
-    return data.url;
-  };
-
-  // Agregar producto
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
-    setLoading(true);
-
-    try {
-      // Subir imágenes de colores primero
-      const coloresConImagenes = await Promise.all(
-        colores.map(async (color) => {
-          if (color.archivoImagen) {
-            const url = await uploadColorImage(color.archivoImagen);
-            return { nombre: color.nombre, hex: color.hex, imagen: url };
-          }
-          return { nombre: color.nombre, hex: color.hex };
-        })
-      );
-
-      // Preparar FormData
-      const formData = new FormData();
-      formData.append('nombre', nombre);
-      formData.append('categoria', categoria);
-      formData.append('precio', precio);
-      formData.append('descripcion', descripcion);
-      formData.append('imagen', imagenPrincipal);
-      formData.append('colores', JSON.stringify(coloresConImagenes));
-      formData.append('novedad', novedad);
-
-      const response = await fetch(`${API_URL}/productos`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: formData
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Error al guardar producto');
-      }
-
-      setSuccess('✅ Producto agregado exitosamente!');
-      
-      // Limpiar formulario
-      setNombre('');
-      setCategoria('');
-      setPrecio('');
-      setDescripcion('');
-      setImagenPrincipal(null);
-      setColores([]);
-      setNovedad(false);
-      document.getElementById('imagen-input').value = '';
-      
-      // Recargar productos
-      cargarProductos();
-    } catch (err) {
-      setError('❌ ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Eliminar producto
-  const eliminarProducto = async (id) => {
-    if (!window.confirm('¿Eliminar este producto?')) return;
+app.use(cors({
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true);
     
-    try {
-      const response = await fetch(`${API_URL}/productos/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (!response.ok) {
-        throw new Error('Error al eliminar');
-      }
-
-      setSuccess('🗑️ Producto eliminado');
-      cargarProductos();
-    } catch (err) {
-      setError('❌ ' + err.message);
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (origin === allowed) return true;
+      if (origin.startsWith(allowed)) return true;
+      if (allowed.includes('vercel.app') && origin.includes('vercel.app')) return true;
+      return false;
+    });
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.error('CORS Error - Origin not allowed:', origin);
+      callback(new Error('Not allowed by CORS'));
     }
-  };
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
-  // Agregar color
-  const agregarColor = () => {
-    setColores([...colores, { nombre: '', hex: '#6B7F3C', archivoImagen: null }]);
-  };
+app.use(express.json());
 
-  // Actualizar color
-  const actualizarColor = (index, field, value) => {
-    const nuevosColores = [...colores];
-    nuevosColores[index][field] = value;
-    setColores(nuevosColores);
-  };
-
-  // Eliminar color
-  const eliminarColor = (index) => {
-    setColores(colores.filter((_, i) => i !== index));
-  };
-
-  // Pantalla de Login
-  if (!token) {
-    return (
-      <div className="admin-login">
-        <div className="login-box">
-          <h1>🔐 Panel Admin</h1>
-          <p>STUDIO AYNI</p>
-          
-          {error && <div className="error-msg">{error}</div>}
-          {success && <div className="success-msg">{success}</div>}
-          
-          <form onSubmit={handleLogin}>
-            <input
-              type="text"
-              placeholder="Usuario o Email"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              disabled={loading}
-            />
-            <input
-              type="password"
-              placeholder="Contraseña"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              disabled={loading}
-            />
-            <button type="submit" className="btn-login" disabled={loading}>
-              {loading ? 'Iniciando...' : 'Iniciar Sesión'}
-            </button>
-          </form>
-          
-          <div className="help-text" style={{marginTop: '1.5rem', padding: '1rem', background: '#F5F0E8', borderRadius: '6px'}}>
-            <p style={{marginBottom: '0.5rem'}}><strong>👤 Usuario por defecto:</strong></p>
-            <p>Email: admin@ayni.com</p>
-            <p>Contraseña: admin123</p>
-          </div>
-        </div>
-      </div>
-    );
+// ============================================
+// CONFIGURACIÓN DE CLOUDINARY STORAGE
+// ============================================
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'studio-ayni',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+    transformation: [{ width: 1000, height: 1000, crop: 'limit' }]
   }
+});
 
-  // Panel de Admin
-  return (
-    <div className="admin-container">
-      <div className="admin-header">
-        <div>
-          <h1>🎨 Panel de Administración</h1>
-          <p>STUDIO AYNI</p>
-        </div>
-        <button onClick={handleLogout} className="btn-logout">
-          <LogOut size={20} />
-          Cerrar Sesión
-        </button>
-      </div>
+const upload = multer({ storage: storage });
 
-      {error && <div className="error-msg">{error}</div>}
-      {success && <div className="success-msg">{success}</div>}
+// ============================================
+// MIDDLEWARE DE AUTENTICACIÓN
+// ============================================
+const verificarToken = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'No autorizado' });
 
-      <div className="admin-content">
-        {/* FORMULARIO */}
-        <div className="admin-form">
-          <h2>➕ Agregar Producto</h2>
-          
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label>Nombre del Producto *</label>
-              <input
-                type="text"
-                value={nombre}
-                onChange={(e) => setNombre(e.target.value)}
-                required
-                placeholder="Ej: Maceta Geométrica"
-              />
-            </div>
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    req.userId = decoded.userId;
+    next();
+  } catch (error) {
+    res.status(401).json({ error: 'Token inválido' });
+  }
+};
 
-            <div className="form-group">
-              <label>Categoría *</label>
-              <select value={categoria} onChange={(e) => setCategoria(e.target.value)} required>
-                <option value="">Seleccionar...</option>
-                <option value="hogar">Hogar</option>
-                <option value="organizadores">Organizadores</option>
-                <option value="joyeria">Joyería</option>
-                <option value="maquillaje">Maquillaje</option>
-                <option value="bebes">Bebés</option>
-                <option value="gadgets">Gadgets</option>
-              </select>
-            </div>
+// ============================================
+// INICIALIZACIÓN - CREAR USUARIO ADMIN
+// ============================================
+async function initializeAdmin() {
+  try {
+    const { data: existingUser } = await supabase
+      .from('usuarios')
+      .select('id')
+      .eq('email', 'admin@ayni.com')
+      .single();
 
-            <div className="form-group">
-              <label>Precio (Bs) *</label>
-              <input
-                type="number"
-                step="0.01"
-                value={precio}
-                onChange={(e) => setPrecio(e.target.value)}
-                required
-                placeholder="15.00"
-              />
-            </div>
-
-            <div className="form-group">
-              <label>Imagen Principal *</label>
-              <input
-                id="imagen-input"
-                type="file"
-                accept="image/*"
-                onChange={(e) => setImagenPrincipal(e.target.files[0])}
-                required
-              />
-              <p className="help-text">📸 Sube la foto principal del producto</p>
-            </div>
-
-            <div className="form-group">
-              <label>Descripción *</label>
-              <textarea
-                value={descripcion}
-                onChange={(e) => setDescripcion(e.target.value)}
-                required
-                placeholder="Descripción del producto..."
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={novedad}
-                  onChange={(e) => setNovedad(e.target.checked)}
-                  className="checkbox-input"
-                />
-                <span className="checkbox-text">
-                  ✨ Marcar como Novedad del Mes
-                </span>
-              </label>
-              <p className="help-text">Los productos marcados aparecerán en el carrusel de novedades</p>
-            </div>
-
-            <div className="form-group">
-              <label>Colores (Opcional)</label>
-              {colores.map((color, index) => (
-                <div key={index} className="color-input-group">
-                  <input
-                    type="text"
-                    placeholder="Nombre"
-                    value={color.nombre}
-                    onChange={(e) => actualizarColor(index, 'nombre', e.target.value)}
-                  />
-                  <input
-                    type="color"
-                    value={color.hex}
-                    onChange={(e) => actualizarColor(index, 'hex', e.target.value)}
-                  />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => actualizarColor(index, 'archivoImagen', e.target.files[0])}
-                  />
-                  <button type="button" onClick={() => eliminarColor(index)} className="btn-delete">
-                    <X size={20} />
-                  </button>
-                </div>
-              ))}
-              <button type="button" onClick={agregarColor} className="btn-add-color">
-                + Agregar Color
-              </button>
-            </div>
-
-            <button type="submit" className="btn-submit" disabled={loading}>
-              {loading ? '⏳ Guardando...' : '✅ Guardar Producto'}
-            </button>
-          </form>
-        </div>
-
-        {/* INVENTARIO */}
-        <div className="admin-inventory">
-          <h2>📦 Inventario ({productos.length})</h2>
-          
-          <div className="product-list">
-            {productos.length === 0 ? (
-              <p className="empty-state">No hay productos. ¡Agrega el primero!</p>
-            ) : (
-              productos.map((producto) => (
-                <div key={producto.id} className="product-item">
-                  <img 
-                    src={producto.imagen?.startsWith('http') ? producto.imagen : `https://studio-ayni-backend.onrender.com${producto.imagen}`} 
-                    alt={producto.nombre} 
-                  />
-                  <div className="product-details">
-                    <h3>
-                      {producto.nombre}
-                      {producto.novedad && (
-                        <span className="novedad-badge-admin">✨ NOVEDAD</span>
-                      )}
-                    </h3>
-                    <p className="product-category">{producto.categoria}</p>
-                    <p className="product-price">Bs {producto.precio}</p>
-                    {producto.colores && producto.colores.length > 0 && (
-                      <div className="product-colors">
-                        {producto.colores.map((color, i) => (
-                          <span
-                            key={i}
-                            className="color-dot"
-                            style={{ backgroundColor: color.hex }}
-                            title={color.nombre}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => eliminarProducto(producto.id)}
-                    className="btn-delete-product"
-                  >
-                    <Trash2 size={20} />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+    if (!existingUser) {
+      const hashedPassword = await bcrypt.hash('admin123', 10);
+      const { error } = await supabase
+        .from('usuarios')
+        .insert([{
+          email: 'admin@ayni.com',
+          password: hashedPassword,
+          role: 'admin'
+        }]);
+      
+      if (!error) {
+        console.log('✅ Usuario admin creado: admin@ayni.com / admin123');
+      }
+    } else {
+      console.log('ℹ️  Usuario admin ya existe');
+    }
+  } catch (error) {
+    console.log('⚠️  Error inicializando admin:', error.message);
+  }
 }
 
-export default Admin;
+// Ejecutar inicialización
+setTimeout(initializeAdmin, 2000);
+
+// ============================================
+// RUTAS DE AUTENTICACIÓN
+// ============================================
+
+// POST - Login (acepta username o email)
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, username, password } = req.body;
+    
+    // Buscar usuario por username o email
+    const loginField = username || email;
+    const isEmail = loginField && loginField.includes('@');
+    
+    const { data: user, error } = await supabase
+      .from('usuarios')
+      .select('*')
+      .or(isEmail ? `email.eq.${loginField}` : `username.eq.${loginField}`)
+      .single();
+
+    if (error || !user) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    const token = jwt.sign({ userId: user.id }, SECRET_KEY, { expiresIn: '24h' });
+    res.json({ 
+      token, 
+      user: { 
+        id: user.id, 
+        email: user.email, 
+        username: user.username,
+        role: user.role 
+      } 
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET - Verificar token
+app.get('/api/verify', verificarToken, (req, res) => {
+  res.json({ valid: true });
+});
+
+// ============================================
+// RUTAS DE PRODUCTOS
+// ============================================
+
+// GET - Obtener todos los productos
+app.get('/api/productos', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('productos')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    res.json(data || []);
+  } catch (error) {
+    console.error('Error getting productos:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET - Obtener un producto por ID
+app.get('/api/productos/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('productos')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error) throw error;
+
+    if (!data) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error('Error getting producto:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST - Agregar producto
+app.post('/api/productos', verificarToken, upload.single('imagen'), async (req, res) => {
+  try {
+    const { nombre, categoria, precio, descripcion, colores, novedad } = req.body;
+
+    const nuevoProducto = {
+      nombre,
+      categoria,
+      precio: parseFloat(precio),
+      descripcion,
+      imagen: req.file ? req.file.path : null,
+      colores: colores ? JSON.parse(colores) : [],
+      novedad: novedad === 'true' || novedad === true
+    };
+
+    const { data, error } = await supabase
+      .from('productos')
+      .insert([nuevoProducto])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log('✅ Producto agregado:', data.nombre);
+    res.json({ success: true, producto: data });
+  } catch (error) {
+    console.error('Error adding producto:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT - Actualizar producto
+app.put('/api/productos/:id', verificarToken, upload.single('imagen'), async (req, res) => {
+  try {
+    const { nombre, categoria, precio, descripcion, colores, novedad } = req.body;
+
+    // Obtener producto actual
+    const { data: productoActual } = await supabase
+      .from('productos')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (!productoActual) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    const productoActualizado = {
+      nombre,
+      categoria,
+      precio: parseFloat(precio),
+      descripcion,
+      imagen: req.file ? req.file.path : productoActual.imagen,
+      colores: colores ? JSON.parse(colores) : productoActual.colores,
+      novedad: novedad === 'true' || novedad === true,
+      updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabase
+      .from('productos')
+      .update(productoActualizado)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log('✅ Producto actualizado:', data.nombre);
+    res.json({ success: true, producto: data });
+  } catch (error) {
+    console.error('Error updating producto:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE - Eliminar producto
+app.delete('/api/productos/:id', verificarToken, async (req, res) => {
+  try {
+    // Obtener producto para eliminar imagen de Cloudinary
+    const { data: producto } = await supabase
+      .from('productos')
+      .select('imagen')
+      .eq('id', req.params.id)
+      .single();
+
+    if (producto && producto.imagen && producto.imagen.includes('cloudinary.com')) {
+      try {
+        const publicId = producto.imagen.split('/').slice(-2).join('/').split('.')[0];
+        await cloudinary.uploader.destroy(publicId);
+        console.log('✅ Imagen eliminada de Cloudinary');
+      } catch (error) {
+        console.error('Error eliminando imagen:', error);
+      }
+    }
+
+    const { error } = await supabase
+      .from('productos')
+      .delete()
+      .eq('id', req.params.id);
+
+    if (error) throw error;
+
+    console.log('✅ Producto eliminado');
+    res.json({ success: true, message: 'Producto eliminado' });
+  } catch (error) {
+    console.error('Error deleting producto:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// RUTAS DE PEDIDOS
+// ============================================
+
+// POST - Crear pedido
+app.post('/api/pedidos', async (req, res) => {
+  try {
+    const { cliente, productos, total, metodoPago } = req.body;
+
+    const nuevoPedido = {
+      cliente,
+      productos,
+      total: parseFloat(total),
+      metodo_pago: metodoPago || 'whatsapp',
+      estado: 'pendiente'
+    };
+
+    const { data, error } = await supabase
+      .from('pedidos')
+      .insert([nuevoPedido])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log('✅ Pedido creado:', data.id);
+    res.json({ success: true, pedido: data });
+  } catch (error) {
+    console.error('Error creating pedido:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET - Obtener todos los pedidos
+app.get('/api/pedidos', verificarToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('pedidos')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    res.json(data || []);
+  } catch (error) {
+    console.error('Error getting pedidos:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// RUTAS DE USUARIOS
+// ============================================
+
+// GET - Obtener usuarios
+app.get('/api/usuarios', verificarToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('usuarios')
+      .select('id, email, role, created_at');
+
+    if (error) throw error;
+
+    res.json(data || []);
+  } catch (error) {
+    console.error('Error getting usuarios:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// RUTA DE SALUD
+// ============================================
+
+app.get('/api/health', async (req, res) => {
+  try {
+    // Probar conexión a Supabase
+    const { data, error } = await supabase
+      .from('productos')
+      .select('count');
+
+    res.json({ 
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      cloudinary: cloudinary.config().cloud_name ? 'configured' : 'not configured',
+      supabase: error ? 'error' : 'connected',
+      database: error ? 'disconnected' : 'connected',
+      cors: 'enabled',
+      allowedOrigins: allowedOrigins
+    });
+  } catch (error) {
+    res.json({
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      supabase: 'error',
+      error: error.message
+    });
+  }
+});
+
+// ============================================
+// RUTA ROOT
+// ============================================
+
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Studio AYNI API with Supabase',
+    version: '2.0.0',
+    database: 'Supabase PostgreSQL',
+    endpoints: {
+      health: '/api/health',
+      productos: '/api/productos',
+      pedidos: '/api/pedidos',
+      login: '/api/login'
+    }
+  });
+});
+
+// ============================================
+// INICIO DEL SERVIDOR
+// ============================================
+
+if (process.env.VERCEL) {
+  module.exports = app;
+} else {
+  app.listen(PORT, () => {
+    console.log(`
+ ╔════════════════════════════════════════╗
+ ║ 🎨 SERVIDOR STUDIO AYNI - SUPABASE   ║
+ ╠════════════════════════════════════════╣
+ ║  Puerto: ${PORT}                      ║
+ ║  API: http://localhost:${PORT}/api    ║
+ ║                                        ║
+ ║  👤 Usuario por defecto:              ║
+ ║     Email: admin@ayni.com             ║
+ ║     Pass: admin123                    ║
+ ║                                        ║
+ ║  💾 Base de datos: Supabase          ║
+ ║  🔗 URL: omdzbitywwccricrdjnd        ║
+ ║  ☁️  Cloudinary: ${cloudinary.config().cloud_name || 'No configurado'} ║
+ ║  🔒 CORS: Habilitado                  ║
+ ╚════════════════════════════════════════╝
+    `);
+  });
+}
