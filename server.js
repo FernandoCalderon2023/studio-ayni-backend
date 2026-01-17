@@ -99,27 +99,35 @@ const verificarToken = (req, res, next) => {
 // ============================================
 async function initializeAdmin() {
   try {
+    // Buscamos por email o username
     const { data: existingUser } = await supabase
       .from('usuarios')
       .select('id')
-      .eq('email', 'admin@ayni.com')
+      .or('email.eq.admin@ayni.com,username.eq.fernando')
       .single();
 
     if (!existingUser) {
-      const hashedPassword = await bcrypt.hash('admin123', 10);
+      console.log('⚙️ Creando usuario administrador...');
+      
+      // AQUÍ DEFINIMOS LA NUEVA CONTRASEÑA
+      const hashedPassword = await bcrypt.hash('Fernando2026!', 10);
+      
       const { error } = await supabase
         .from('usuarios')
         .insert([{
           email: 'admin@ayni.com',
+          username: 'fernando', // Agregamos el username
           password: hashedPassword,
           role: 'admin'
         }]);
       
       if (!error) {
-        console.log('✅ Usuario admin creado: admin@ayni.com / admin123');
+        console.log('✅ Usuario creado: fernando / Fernando2026!');
+      } else {
+        console.error('❌ Error creando usuario:', error.message);
       }
     } else {
-      console.log('ℹ️  Usuario admin ya existe');
+      console.log('ℹ️  El usuario admin ya existe');
     }
   } catch (error) {
     console.log('⚠️  Error inicializando admin:', error.message);
