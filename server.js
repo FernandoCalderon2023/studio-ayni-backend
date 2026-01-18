@@ -33,7 +33,6 @@ cloudinary.config({
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
-  'https://studio-ayni.vercel.app',
   'https://studio-ayni-frontend-o3uv.vercel.app',
   'https://studio-ayni-frontend.vercel.app',
   'https://fernandocalderon2023.github.io'
@@ -99,35 +98,27 @@ const verificarToken = (req, res, next) => {
 // ============================================
 async function initializeAdmin() {
   try {
-    // Buscamos por email o username
     const { data: existingUser } = await supabase
       .from('usuarios')
       .select('id')
-      .or('email.eq.admin@ayni.com,username.eq.fernando')
+      .eq('email', 'admin@ayni.com')
       .single();
 
     if (!existingUser) {
-      console.log('⚙️ Creando usuario administrador...');
-      
-      // AQUÍ DEFINIMOS LA NUEVA CONTRASEÑA
-      const hashedPassword = await bcrypt.hash('Fernando2026!', 10);
-      
+      const hashedPassword = await bcrypt.hash('admin123', 10);
       const { error } = await supabase
         .from('usuarios')
         .insert([{
           email: 'admin@ayni.com',
-          username: 'fernando', // Agregamos el username
           password: hashedPassword,
           role: 'admin'
         }]);
       
       if (!error) {
-        console.log('✅ Usuario creado: fernando / Fernando2026!');
-      } else {
-        console.error('❌ Error creando usuario:', error.message);
+        console.log('✅ Usuario admin creado: admin@ayni.com / admin123');
       }
     } else {
-      console.log('ℹ️  El usuario admin ya existe');
+      console.log('ℹ️  Usuario admin ya existe');
     }
   } catch (error) {
     console.log('⚠️  Error inicializando admin:', error.message);
@@ -344,16 +335,22 @@ app.delete('/api/productos/:id', verificarToken, async (req, res) => {
 // ============================================
 
 // POST - Crear pedido
+// POST - Crear pedido (desde checkout o manual)
 app.post('/api/pedidos', async (req, res) => {
   try {
-    const { cliente, productos, total, metodoPago } = req.body;
+    const { cliente, productos, total, metodoPago, estado, estado_pago, monto_adelanto, notas } = req.body;
 
     const nuevoPedido = {
       cliente,
       productos,
       total: parseFloat(total),
       metodo_pago: metodoPago || 'whatsapp',
-      estado: 'pendiente'
+      estado: estado || 'pedido',
+      estado_pago: estado_pago || 'pendiente',
+      monto_adelanto: parseFloat(monto_adelanto) || 0,
+      notas: notas || '',
+      cliente_nombre: cliente?.nombre || '',
+      cliente_whatsapp: cliente?.whatsapp || ''
     };
 
     const { data, error } = await supabase
@@ -368,6 +365,65 @@ app.post('/api/pedidos', async (req, res) => {
     res.json({ success: true, pedido: data });
   } catch (error) {
     console.error('Error creating pedido:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT - Actualizar pedido
+app.put('/api/pedidos/:id', verificarToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { cliente, productos, total, estado, estado_pago, monto_adelanto, notas } = req.body;
+
+    const updateData = {
+      updated_at: new Date().toISOString()
+    };
+
+    if (cliente) {
+      updateData.cliente = cliente;
+      updateData.cliente_nombre = cliente.nombre || '';
+      updateData.cliente_whatsapp = cliente.whatsapp || '';
+    }
+    if (productos) updateData.productos = productos;
+    if (total !== undefined) updateData.total = parseFloat(total);
+    if (estado) updateData.estado = estado;
+    if (estado_pago) updateData.estado_pago = estado_pago;
+    if (monto_adelanto !== undefined) updateData.monto_adelanto = parseFloat(monto_adelanto);
+    if (notas !== undefined) updateData.notas = notas;
+
+    const { data, error } = await supabase
+      .from('pedidos')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log('✅ Pedido actualizado:', id);
+    res.json({ success: true, pedido: data });
+  } catch (error) {
+    console.error('Error updating pedido:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE - Eliminar pedido
+app.delete('/api/pedidos/:id', verificarToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { error } = await supabase
+      .from('pedidos')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+
+    console.log('✅ Pedido eliminado:', id);
+    res.json({ success: true, message: 'Pedido eliminado' });
+  } catch (error) {
+    console.error('Error deleting pedido:', error);
     res.status(500).json({ error: error.message });
   }
 });
