@@ -338,7 +338,7 @@ app.delete('/api/productos/:id', verificarToken, async (req, res) => {
 // POST - Crear pedido (desde checkout o manual)
 app.post('/api/pedidos', async (req, res) => {
   try {
-    const { cliente, productos, total, metodoPago, estado, estado_pago, monto_adelanto, notas } = req.body;
+    const { cliente, productos, total, metodoPago, estado, estado_pago, monto_adelanto, notas, urgente, fecha_entrega, maquina } = req.body;
 
     const nuevoPedido = {
       cliente,
@@ -350,7 +350,10 @@ app.post('/api/pedidos', async (req, res) => {
       monto_adelanto: parseFloat(monto_adelanto) || 0,
       notas: notas || '',
       cliente_nombre: cliente?.nombre || '',
-      cliente_whatsapp: cliente?.whatsapp || ''
+      cliente_whatsapp: cliente?.whatsapp || '',
+      urgente: urgente || false,
+      fecha_entrega: fecha_entrega || null,
+      maquina: maquina || null
     };
 
     const { data, error } = await supabase
@@ -373,7 +376,7 @@ app.post('/api/pedidos', async (req, res) => {
 app.put('/api/pedidos/:id', verificarToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { cliente, productos, total, estado, estado_pago, monto_adelanto, notas } = req.body;
+    const { cliente, productos, total, estado, estado_pago, monto_adelanto, notas, urgente, fecha_entrega, maquina } = req.body;
 
     const updateData = {
       updated_at: new Date().toISOString()
@@ -390,6 +393,9 @@ app.put('/api/pedidos/:id', verificarToken, async (req, res) => {
     if (estado_pago) updateData.estado_pago = estado_pago;
     if (monto_adelanto !== undefined) updateData.monto_adelanto = parseFloat(monto_adelanto);
     if (notas !== undefined) updateData.notas = notas;
+    if (urgente !== undefined) updateData.urgente = urgente;
+    if (fecha_entrega !== undefined) updateData.fecha_entrega = fecha_entrega;
+    if (maquina !== undefined) updateData.maquina = maquina;
 
     const { data, error } = await supabase
       .from('pedidos')
